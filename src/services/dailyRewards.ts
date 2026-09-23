@@ -3,18 +3,24 @@ import type { PowerUpType } from '../gameplay/powerUps';
 export interface DailyRewardTier {
   day: number; // 1-7
   coins: number;
-  hints: number;
-  powerUp: { type: PowerUpType; amount: number } | null;
+  powerUps: { type: PowerUpType; amount: number }[];
 }
 
 export const DAILY_REWARD_TIERS: DailyRewardTier[] = [
-  { day: 1, coins: 20, hints: 0, powerUp: null },
-  { day: 2, coins: 25, hints: 0, powerUp: null },
-  { day: 3, coins: 30, hints: 1, powerUp: null },
-  { day: 4, coins: 40, hints: 0, powerUp: null },
-  { day: 5, coins: 50, hints: 1, powerUp: null },
-  { day: 6, coins: 60, hints: 0, powerUp: { type: 'EXTRA_TIME', amount: 1 } },
-  { day: 7, coins: 100, hints: 2, powerUp: { type: 'FREEZE_TIME', amount: 1 } },
+  { day: 1, coins: 20, powerUps: [] },
+  { day: 2, coins: 25, powerUps: [] },
+  { day: 3, coins: 30, powerUps: [{ type: 'EXTRA_TIME', amount: 1 }] },
+  { day: 4, coins: 40, powerUps: [] },
+  { day: 5, coins: 50, powerUps: [{ type: 'FREEZE_TIME', amount: 1 }] },
+  { day: 6, coins: 60, powerUps: [{ type: 'EXTRA_TIME', amount: 1 }] },
+  {
+    day: 7,
+    coins: 100,
+    powerUps: [
+      { type: 'FREEZE_TIME', amount: 1 },
+      { type: 'EXTRA_TIME', amount: 1 },
+    ],
+  },
 ];
 
 export function getRewardForDay(day: number): DailyRewardTier {
@@ -93,18 +99,41 @@ export function claimDailyReward(state: DailyRewardState, today: string): ClaimR
 
   const dayToReward = isConsecutiveDay ? state.currentRewardDay : 1;
   const reward = getRewardForDay(dayToReward);
-  const dailyStreak = isConsecutiveDay ? state.dailyStreak + 1 : 1;
+  // The streak's own peak for *this* claim, before any end-of-cycle reset
+  // below - highestDailyStreak must still capture reaching Day 7 even
+  // though dailyStreak itself is about to be reset back to 1 for it.
+  const peakStreak = isConsecutiveDay ? state.dailyStreak + 1 : 1;
   const nextRewardDay = (dayToReward % DAILY_REWARD_TIERS.length) + 1;
+  // Claiming Day 7 completes the 7-day cycle - both the reward tier (via
+  // nextRewardDay wrapping to 1 above) and the streak count start over
+  // together, rather than the streak climbing indefinitely past 7.
+  const completedFullCycle = nextRewardDay === 1;
+  const dailyStreak = completedFullCycle ? 1 : peakStreak;
 
   return {
     state: {
       lastClaimDate: today,
       dailyStreak,
       currentRewardDay: nextRewardDay,
-      highestDailyStreak: Math.max(state.highestDailyStreak, dailyStreak),
+      highestDailyStreak: Math.max(state.highestDailyStreak, peakStreak),
     },
     reward,
   };
+}
+
+// What the grid/streak text should show *right now*, before any claim
+// happens - distinct from the persisted state, which only actually resets
+// at the next claimDailyReward() call. Without this, opening the screen
+// after missing a day still renders the old (pre-reset) progress until the
+// player taps Claim, even though that tap is about to reset it anyway.
+export function getDailyRewardDisplayState(
+  state: Pick<DailyRewardState, 'lastClaimDate' | 'dailyStreak' | 'currentRewardDay'>,
+  today: string
+): Pick<DailyRewardState, 'currentRewardDay' | 'dailyStreak'> {
+  const streakBroken =
+    state.lastClaimDate !== null && getDaysBetween(state.lastClaimDate, today) >= 2;
+  if (streakBroken) return { currentRewardDay: 1, dailyStreak: 0 };
+  return { currentRewardDay: state.currentRewardDay, dailyStreak: state.dailyStreak };
 }
 
 export type DailyTileState = 'claimed' | 'today' | 'locked';

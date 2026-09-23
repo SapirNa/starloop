@@ -424,7 +424,12 @@ const LEVEL_DEFINITIONS: LevelDefinition[] = [
     starCount: 10,
     starTypes: ['NORMAL', 'NORMAL', 'NORMAL', 'BOMB'],
     movementSpeed: 24,
-    maxLoops: 4,
+    // Was maxLoops: 4, which demanded a flawless 2-captures-per-loop run
+    // across every single loop (with 2 bombs able to waste one) - zero
+    // margin for even one below-par loop, unlike every sibling maxLoops
+    // level (all sit around an 8-captures-per-5-loops ratio). 5 restores
+    // that same headroom.
+    maxLoops: 5,
     bombPenalty: 'LOSE_LOOP',
     rewardCoins: 36,
   },

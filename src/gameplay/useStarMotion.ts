@@ -1,8 +1,15 @@
-import { useEffect, useMemo } from 'react';
-import { makeMutable, useFrameCallback } from 'react-native-reanimated';
+import { useEffect, useMemo, useRef } from 'react';
+import {
+  Easing,
+  makeMutable,
+  useFrameCallback,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 
 import type { Star } from '../types/star';
+import { hashStringToSeed, seededRandom } from '../utils/random';
 
 export interface StarMotion {
   x: SharedValue<number>;
@@ -23,7 +30,47 @@ interface MotionEntry extends StarMotion {
   // object.
   vx: SharedValue<number>;
   vy: SharedValue<number>;
+  // Where this star actually belongs (its layout position) - x/y start off
+  // at a point well outside the canvas and animate in to here, see the
+  // entrance effect below. Plain numbers are enough; unlike x/y this never
+  // needs to be read reactively.
+  targetX: number;
+  targetY: number;
+  entranceDelayMs: number;
 }
+
+// How far outside the canvas each star starts, along the direction from
+// canvas center through its own layout position (falling back to a random
+// direction for the rare star that lands exactly on center) - the diagonal
+// is a generous, direction-independent guarantee that the start point is
+// off-screen no matter which way that direction points.
+function entranceStartPosition(
+  targetX: number,
+  targetY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  random: () => number
+): { x: number; y: number } {
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  let dx = targetX - centerX;
+  let dy = targetY - centerY;
+  const magnitude = Math.hypot(dx, dy);
+  if (magnitude < 1) {
+    const angle = random() * Math.PI * 2;
+    dx = Math.cos(angle);
+    dy = Math.sin(angle);
+  } else {
+    dx /= magnitude;
+    dy /= magnitude;
+  }
+  const pushDistance = Math.hypot(canvasWidth, canvasHeight);
+  return { x: targetX + dx * pushDistance, y: targetY + dy * pushDistance };
+}
+
+const ENTRANCE_DURATION_MS = 420;
+const ENTRANCE_MAX_STAGGER_MS = 220;
+const ENTRANCE_TOTAL_MS = ENTRANCE_DURATION_MS + ENTRANCE_MAX_STAGGER_MS;
 
 export interface StarMotionHandle {
   // Per-star reactive position, for driving Skia cx/cy props during render.
@@ -52,14 +99,21 @@ export function useStarMotion(
   const starIdsKey = stars.map((star) => star.id).join(',');
 
   const entries = useMemo<MotionEntry[]>(() => {
-    return stars.map((star) => ({
-      id: star.id,
-      x: makeMutable(star.x),
-      y: makeMutable(star.y),
-      radius: star.size,
-      vx: makeMutable(star.vx),
-      vy: makeMutable(star.vy),
-    }));
+    return stars.map((star) => {
+      const random = seededRandom(hashStringToSeed(star.id));
+      const start = entranceStartPosition(star.x, star.y, canvasWidth, canvasHeight, random);
+      return {
+        id: star.id,
+        x: makeMutable(start.x),
+        y: makeMutable(start.y),
+        radius: star.size,
+        vx: makeMutable(star.vx),
+        vy: makeMutable(star.vy),
+        targetX: star.x,
+        targetY: star.y,
+        entranceDelayMs: random() * ENTRANCE_MAX_STAGGER_MS,
+      };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on ids, not the stars array
   }, [starIdsKey]);
 
@@ -108,7 +162,49 @@ export function useStarMotion(
   });
   /* eslint-enable react-hooks/immutability */
 
+  // Bounce physics stays off for the duration of the entrance animation -
+  // otherwise this same frame callback would overwrite x/y with
+  // vx/vy-driven positions every frame, fighting (and winning against) the
+  // withTiming entrance animation, which just looks like the stars snap
+  // straight to their resting position instead of flying in.
+  const enteringRef = useRef(true);
+  const pausedRef = useRef(paused);
   useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  /* eslint-disable react-hooks/immutability --
+   * Kicking off each star's fly-in animation by assigning `.value =
+   * withDelay(...)` here, once per new star set, is the same useEffect-time
+   * mutation pattern useStarAnimations.ts uses for its own animations
+   * (e.g. startIdleAnimations) - not a per-frame loop, but the same
+   * "outside render" justification applies. */
+  useEffect(() => {
+    enteringRef.current = true;
+    frameCallback.setActive(false);
+
+    for (const entry of entries) {
+      entry.x.value = withDelay(
+        entry.entranceDelayMs,
+        withTiming(entry.targetX, { duration: ENTRANCE_DURATION_MS, easing: Easing.out(Easing.cubic) })
+      );
+      entry.y.value = withDelay(
+        entry.entranceDelayMs,
+        withTiming(entry.targetY, { duration: ENTRANCE_DURATION_MS, easing: Easing.out(Easing.cubic) })
+      );
+    }
+
+    const timer = setTimeout(() => {
+      enteringRef.current = false;
+      frameCallback.setActive(!pausedRef.current);
+    }, ENTRANCE_TOTAL_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- entrance kicks off once per new star set (entries); frameCallback is a stable ref across renders
+  }, [entries]);
+  /* eslint-enable react-hooks/immutability */
+
+  useEffect(() => {
+    if (enteringRef.current) return; // the entrance-completion timer above will activate it once it's done
     frameCallback.setActive(!paused);
   }, [paused, frameCallback]);
 

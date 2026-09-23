@@ -1,6 +1,7 @@
 import {
   claimDailyReward,
   evaluateClaim,
+  getDailyRewardDisplayState,
   getDayTileState,
   getDaysBetween,
   getLocalDateString,
@@ -170,7 +171,7 @@ describe('claimDailyReward', () => {
     expect(result?.state.highestDailyStreak).toBe(5);
   });
 
-  it('wraps from day 7 back to day 1 while keeping the streak climbing', () => {
+  it('completing the 7-day cycle wraps the reward tier AND resets the streak back to 1', () => {
     const state: DailyRewardState = {
       lastClaimDate: '2024-01-07',
       dailyStreak: 7,
@@ -180,8 +181,37 @@ describe('claimDailyReward', () => {
     const result = claimDailyReward(state, '2024-01-08');
     expect(result?.reward.day).toBe(7);
     expect(result?.state.currentRewardDay).toBe(1);
-    expect(result?.state.dailyStreak).toBe(8);
+    expect(result?.state.dailyStreak).toBe(1);
+    // The peak of 8 this claim actually reached (state.dailyStreak + 1)
+    // must still be recorded as the high-water mark, even though the
+    // persisted streak itself resets to 1 in the same transition.
     expect(result?.state.highestDailyStreak).toBe(8);
+  });
+
+  it('a full, unbroken 7-claim cycle ends with the streak reset to 1 and loops back into Day 1', () => {
+    let current = FRESH;
+    const days = ['01', '02', '03', '04', '05', '06', '07'];
+    let lastReward = null as ReturnType<typeof claimDailyReward>;
+    for (const day of days) {
+      lastReward = claimDailyReward(current, `2024-01-${day}`);
+      current = lastReward!.state;
+    }
+
+    // The 7th claim just granted Day 7's tier...
+    expect(lastReward?.reward.day).toBe(7);
+    // ...but the cycle immediately restarts: next tier is Day 1 again, and
+    // the streak resets rather than continuing on to 8.
+    expect(current.currentRewardDay).toBe(1);
+    expect(current.dailyStreak).toBe(1);
+    expect(current.highestDailyStreak).toBe(7);
+
+    // Claiming the next day (the cycle's new "Day 1") behaves exactly like
+    // starting a fresh week: reward is Day 1's tier again, streak climbs
+    // from the post-reset 1 to 2 (still counted as consecutive).
+    const nextCycleClaim = claimDailyReward(current, '2024-01-08');
+    expect(nextCycleClaim?.reward.day).toBe(1);
+    expect(nextCycleClaim?.state.dailyStreak).toBe(2);
+    expect(nextCycleClaim?.state.currentRewardDay).toBe(2);
   });
 
   it('returns null when the clock moved backward (duplicate/exploit prevention)', () => {
@@ -192,6 +222,69 @@ describe('claimDailyReward', () => {
       highestDailyStreak: 3,
     };
     expect(claimDailyReward(state, '2024-01-05')).toBeNull();
+  });
+});
+
+describe('getDailyRewardDisplayState', () => {
+  it('shows the raw stored progress on the very first visit (nothing claimed yet)', () => {
+    expect(getDailyRewardDisplayState(FRESH, '2024-01-05')).toEqual({
+      currentRewardDay: 1,
+      dailyStreak: 0,
+    });
+  });
+
+  it('shows the raw stored progress right after claiming today', () => {
+    const state: DailyRewardState = {
+      lastClaimDate: '2024-01-05',
+      dailyStreak: 3,
+      currentRewardDay: 4,
+      highestDailyStreak: 3,
+    };
+    expect(getDailyRewardDisplayState(state, '2024-01-05')).toEqual({
+      currentRewardDay: 4,
+      dailyStreak: 3,
+    });
+  });
+
+  it('still shows the un-broken streak the day right after a claim, before that claim happens', () => {
+    const state: DailyRewardState = {
+      lastClaimDate: '2024-01-05',
+      dailyStreak: 3,
+      currentRewardDay: 4,
+      highestDailyStreak: 3,
+    };
+    expect(getDailyRewardDisplayState(state, '2024-01-06')).toEqual({
+      currentRewardDay: 4,
+      dailyStreak: 3,
+    });
+  });
+
+  it('previews the Day-1 reset immediately once a full day has been missed, before Claim is tapped', () => {
+    // Same scenario as claimDailyReward's "resets after missing several
+    // days" test, but checked *before* the player has actually claimed -
+    // the grid/streak must already reflect the reset, not the stale Day 6.
+    const state: DailyRewardState = {
+      lastClaimDate: '2024-01-05',
+      dailyStreak: 5,
+      currentRewardDay: 6,
+      highestDailyStreak: 5,
+    };
+    expect(getDailyRewardDisplayState(state, '2024-01-09')).toEqual({
+      currentRewardDay: 1,
+      dailyStreak: 0,
+    });
+  });
+
+  it('agrees with what claimDailyReward actually grants once the player does claim', () => {
+    const state: DailyRewardState = {
+      lastClaimDate: '2024-01-05',
+      dailyStreak: 5,
+      currentRewardDay: 6,
+      highestDailyStreak: 5,
+    };
+    const preview = getDailyRewardDisplayState(state, '2024-01-09');
+    const result = claimDailyReward(state, '2024-01-09');
+    expect(result?.reward.day).toBe(preview.currentRewardDay);
   });
 });
 

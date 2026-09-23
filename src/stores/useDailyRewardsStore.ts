@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import {
   claimDailyReward,
   evaluateClaim,
+  getDailyRewardDisplayState,
   getLocalDateString,
   type ClaimEvaluation,
   type DailyRewardTier,
@@ -21,6 +22,10 @@ interface DailyRewardsState {
 
   hydrate: () => Promise<void>;
   getClaimStatus: () => ClaimEvaluation;
+  // What the grid/streak should render right now - already reflects a
+  // missed-day reset even before the player taps Claim. See
+  // services/dailyRewards.ts.
+  getDisplayState: () => Pick<DailyRewardsState, 'currentRewardDay' | 'dailyStreak'>;
   // Claims today's reward and credits it to the economy. Returns the
   // granted reward, or null if a claim isn't currently allowed (already
   // claimed today, or the clock moved backward).
@@ -57,6 +62,8 @@ export const useDailyRewardsStore = create<DailyRewardsState>()((set, get) => ({
 
   getClaimStatus: () => evaluateClaim(get(), getLocalDateString()),
 
+  getDisplayState: () => getDailyRewardDisplayState(get(), getLocalDateString()),
+
   claim: () => {
     const state = get();
     const result = claimDailyReward(state, getLocalDateString());
@@ -72,9 +79,8 @@ export const useDailyRewardsStore = create<DailyRewardsState>()((set, get) => ({
 
     const economy = useEconomyStore.getState();
     economy.addCoins(result.reward.coins);
-    if (result.reward.hints > 0) economy.addHints(result.reward.hints);
-    if (result.reward.powerUp) {
-      economy.addPowerUp(result.reward.powerUp.type, result.reward.powerUp.amount);
+    for (const powerUp of result.reward.powerUps) {
+      economy.addPowerUp(powerUp.type, powerUp.amount);
     }
 
     void playSound('rewardOpen');

@@ -11,6 +11,7 @@ import LevelSelectScreen from '../screens/LevelSelectScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import SplashScreen from '../screens/SplashScreen';
+import StoreScreen from '../screens/StoreScreen';
 import WorldMapScreen from '../screens/WorldMapScreen';
 import { COLORS } from '../theme/theme';
 import { RootStackParamList } from '../types/navigation';
@@ -42,6 +43,7 @@ export default function RootNavigator() {
       <Stack.Screen name="Achievements" component={AchievementsScreen} />
       <Stack.Screen name="Profile" component={ProfileScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="Store" component={StoreScreen} />
     </Stack.Navigator>
   );
 }

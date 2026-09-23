@@ -29,4 +29,5 @@ export type RootStackParamList = {
   Achievements: undefined;
   Profile: undefined;
   Settings: undefined;
+  Store: undefined;
 };

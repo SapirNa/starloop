@@ -10,6 +10,7 @@ import Screen from '../components/Screen';
 import Avatar from '../components/ui/Avatar';
 import Badge from '../components/ui/Badge';
 import GameIcon, { type GameIconName } from '../components/ui/GameIcon';
+import WatchAdCoinsModal, { type CoinAdState } from '../components/WatchAdCoinsModal';
 import { getLevelsForWorld, WORLDS } from '../data/worlds';
 import {
   getRewardedAdStatus,
@@ -27,8 +28,6 @@ import { useProfileStore } from '../stores/useProfileStore';
 import { useProgressStore } from '../stores/useProgressStore';
 import { APP_NAME, COLORS, RADIUS, SPACING, TYPOGRAPHY } from '../theme/theme';
 import { RootStackParamList } from '../types/navigation';
-
-type CoinAdState = 'unavailable' | 'loading' | 'available' | 'watching';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -57,7 +56,7 @@ function readStatus(): HomeStatus {
 
 export default function HomeScreen({ navigation }: Props) {
   const coins = useEconomyStore((state) => state.coins);
-  const hints = useEconomyStore((state) => state.hints);
+  const powerUpInventory = useEconomyStore((state) => state.powerUpInventory);
   const displayName = useProfileStore((state) => state.displayName);
   const levelsProgress = useProgressStore((state) => state.levels);
   const canWatchCoinAd = useAdsStore((state) => state.canWatchCoinAd());
@@ -107,6 +106,10 @@ export default function HomeScreen({ navigation }: Props) {
   // away.
   const [showDailyReward, setShowDailyReward] = useState(() => readStatus().rewardAvailable);
   const [status, setStatus] = useState(readStatus);
+  // Reached by tapping the coin count itself, rather than an always-visible
+  // "+100" pill sitting next to it - keeps the wallet row reading as just
+  // one number (how many coins you have) at a glance.
+  const [showCoinAdModal, setShowCoinAdModal] = useState(false);
 
   // Home stays mounted for the app's lifetime (it's the root of the stack),
   // so the badge counters above need an explicit refresh point rather than
@@ -138,25 +141,21 @@ export default function HomeScreen({ navigation }: Props) {
         </Pressable>
 
         <View style={styles.walletRow}>
-          <View style={styles.walletItem}>
+          <Pressable
+            style={styles.walletItem}
+            onPress={() => setShowCoinAdModal(true)}
+            hitSlop={6}
+          >
             <GameIcon name="coins" size={16} color={COLORS.gold} />
             <Text style={styles.walletValue}>{coins}</Text>
-            {canWatchCoinAd && isAdsSdkAvailable && (
-              <Pressable
-                style={[styles.coinAdPill, coinAdState !== 'available' && styles.coinAdPillDisabled]}
-                disabled={coinAdState !== 'available'}
-                onPress={() => void handleWatchAdForCoins()}
-                hitSlop={6}
-              >
-                <Text style={styles.coinAdPillText}>
-                  {coinAdState === 'watching' ? '...' : `+${REWARDED_COIN_AD_AMOUNT}`}
-                </Text>
-              </Pressable>
-            )}
+          </Pressable>
+          <View style={styles.walletItem}>
+            <GameIcon name="powerUpFreeze" size={16} color={COLORS.primary} />
+            <Text style={styles.walletValue}>{powerUpInventory.FREEZE_TIME}</Text>
           </View>
           <View style={styles.walletItem}>
-            <GameIcon name="hint" size={16} color={COLORS.primary} />
-            <Text style={styles.walletValue}>{hints}</Text>
+            <GameIcon name="powerUpExtraTime" size={16} color={COLORS.primary} />
+            <Text style={styles.walletValue}>{powerUpInventory.EXTRA_TIME}</Text>
           </View>
           <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={8}>
             <GameIcon name="settings" size={22} color={COLORS.text} />
@@ -201,10 +200,35 @@ export default function HomeScreen({ navigation }: Props) {
             count={status.claimableAchievements}
             onPress={() => navigation.navigate('Achievements')}
           />
+          <MenuTile
+            icon="store"
+            iconColor={COLORS.gold}
+            label="Store"
+            onPress={() => navigation.navigate('Store')}
+          />
         </View>
       </View>
 
-      <DailyRewardModal visible={showDailyReward} onClose={() => setShowDailyReward(false)} />
+      <DailyRewardModal
+        visible={showDailyReward}
+        onClose={() => {
+          setShowDailyReward(false);
+          // The modal renders as an overlay on Home itself (not a real
+          // navigation transition), so useFocusEffect below never re-fires
+          // for a claim made here - refresh explicitly instead, or the
+          // reward dot keeps showing after an already-claimed reward.
+          setStatus(readStatus());
+        }}
+      />
+
+      <WatchAdCoinsModal
+        visible={showCoinAdModal}
+        coins={coins}
+        amount={REWARDED_COIN_AD_AMOUNT}
+        adState={isAdsSdkAvailable ? coinAdState : 'unavailable'}
+        onWatchAd={() => void handleWatchAdForCoins()}
+        onClose={() => setShowCoinAdModal(false)}
+      />
     </Screen>
   );
 }
@@ -268,20 +292,6 @@ const styles = StyleSheet.create({
   walletValue: {
     color: COLORS.text,
     fontSize: 15,
-    fontWeight: '700',
-  },
-  coinAdPill: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.pill,
-    paddingHorizontal: SPACING.xs + 2,
-    paddingVertical: 2,
-  },
-  coinAdPillDisabled: {
-    opacity: 0.4,
-  },
-  coinAdPillText: {
-    color: COLORS.success,
-    fontSize: 11,
     fontWeight: '700',
   },
   center: {

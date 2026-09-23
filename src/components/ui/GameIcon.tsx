@@ -14,6 +14,7 @@ export type GameIconName =
   | 'settings'
   | 'coins'
   | 'hint'
+  | 'store'
   | 'lock'
   | 'pause'
   | 'freeze'
@@ -46,6 +47,7 @@ const ICON_MAP: Record<GameIconName, keyof typeof Ionicons.glyphMap> = {
   settings: 'settings-outline',
   coins: 'cash-outline',
   hint: 'bulb-outline',
+  store: 'storefront-outline',
   lock: 'lock-closed-outline',
   pause: 'pause',
   freeze: 'snow-outline',

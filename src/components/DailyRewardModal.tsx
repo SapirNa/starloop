@@ -26,10 +26,9 @@ interface DailyRewardModalProps {
 
 function describeReward(tier: DailyRewardTier): string {
   const parts = [`${tier.coins} coins`];
-  if (tier.hints > 0) parts.push(`${tier.hints} hint${tier.hints > 1 ? 's' : ''}`);
-  if (tier.powerUp) {
-    const label = tier.powerUp.type.replace('_', ' ').toLowerCase();
-    parts.push(`${tier.powerUp.amount}x ${label}`);
+  for (const powerUp of tier.powerUps) {
+    const label = powerUp.type.replace('_', ' ').toLowerCase();
+    parts.push(`${powerUp.amount}x ${label}`);
   }
   return parts.join(' + ');
 }
@@ -37,24 +36,27 @@ function describeReward(tier: DailyRewardTier): string {
 function grantReward(reward: DailyRewardTier): void {
   const economy = useEconomyStore.getState();
   economy.addCoins(reward.coins);
-  if (reward.hints > 0) economy.addHints(reward.hints);
-  if (reward.powerUp) economy.addPowerUp(reward.powerUp.type, reward.powerUp.amount);
+  for (const powerUp of reward.powerUps) {
+    economy.addPowerUp(powerUp.type, powerUp.amount);
+  }
 }
 
 // Shown automatically on app startup when a reward is available (see
 // HomeScreen), and reused as-is for the manual "Daily Reward" menu entry
 // (DailyRewardScreen) - one implementation, two entry points.
 export default function DailyRewardModal({ visible, onClose }: DailyRewardModalProps) {
-  const dailyStreak = useDailyRewardsStore((state) => state.dailyStreak);
-  const currentRewardDay = useDailyRewardsStore((state) => state.currentRewardDay);
   const claim = useDailyRewardsStore((state) => state.claim);
   const getClaimStatus = useDailyRewardsStore((state) => state.getClaimStatus);
+  const getDisplayState = useDailyRewardsStore((state) => state.getDisplayState);
   const canDoubleDailyReward = useAdsStore((state) => state.canDoubleDailyReward());
 
   const [justClaimed, setJustClaimed] = useState<DailyRewardTier | null>(null);
   const [doubled, setDoubled] = useState(false);
   const [isWatchingDoubleAd, setIsWatchingDoubleAd] = useState(false);
   const claimStatus = getClaimStatus();
+  // Reflects a missed-day reset immediately, even before Claim is tapped -
+  // see getDailyRewardDisplayState in services/dailyRewards.ts.
+  const { dailyStreak, currentRewardDay } = getDisplayState();
 
   const handleClaim = () => {
     const reward = claim();
