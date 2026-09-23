@@ -38,7 +38,10 @@ module.exports = {
     android: {
       package: 'com.sapir.starloop',
       adaptiveIcon: {
-        backgroundColor: '#E6F4FE',
+        // Matches assets/android-icon-background.png's deep-space gradient -
+        // only used as a fallback where backgroundImage isn't honored,
+        // since backgroundImage takes precedence when both are set.
+        backgroundColor: '#150f30',
         foregroundImage: './assets/android-icon-foreground.png',
         backgroundImage: './assets/android-icon-background.png',
         monochromeImage: './assets/android-icon-monochrome.png',
