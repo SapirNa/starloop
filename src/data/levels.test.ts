@@ -1,16 +1,17 @@
 import { LEVELS } from './levels';
 
-// Levels 1-50 are hand-authored data (see levels.ts) - these checks catch
+// Levels 1-70 are hand-authored data (see levels.ts) - these checks catch
 // authoring mistakes (a GOLD_HUNT/CAPTURE count the level's own star layout
 // can't actually satisfy, a bomb-avoidance level with no bombs, etc.)
 // programmatically rather than relying on manually counting a cyclic
-// star-type pattern by hand for 50 levels.
-describe('LEVELS (1-50) data integrity', () => {
-  it('has exactly 50 levels, sequentially and uniquely IDed', () => {
-    expect(LEVELS).toHaveLength(50);
+// star-type pattern by hand for 70 levels across two worlds (Star Garden:
+// 1-50, Moonlight Sky: 51-70).
+describe('LEVELS (1-70) data integrity', () => {
+  it('has exactly 70 levels, sequentially and uniquely IDed', () => {
+    expect(LEVELS).toHaveLength(70);
     const ids = LEVELS.map((level) => level.id);
-    expect(ids).toEqual(Array.from({ length: 50 }, (_, i) => `level-${i + 1}`));
-    expect(new Set(ids).size).toBe(50);
+    expect(ids).toEqual(Array.from({ length: 70 }, (_, i) => `level-${i + 1}`));
+    expect(new Set(ids).size).toBe(70);
   });
 
   it('every level moves - never a fully stationary default', () => {
@@ -43,6 +44,19 @@ describe('LEVELS (1-50) data integrity', () => {
         if (requirement.type === 'CAPTURE') {
           expect(requirement.count).toBeLessThanOrEqual(collectibleCount);
           expect(requirement.count).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('every COMBO requirement is achievable (comboCount loops of minComboSize each fit within the collectible count)', () => {
+    for (const level of LEVELS) {
+      const collectibleCount = level.stars.filter((star) => star.type !== 'BOMB').length;
+      for (const requirement of level.requirements) {
+        if (requirement.type === 'COMBO') {
+          expect(requirement.comboCount * requirement.minComboSize).toBeLessThanOrEqual(
+            collectibleCount
+          );
         }
       }
     }
@@ -101,5 +115,36 @@ describe('LEVELS (1-50) data integrity', () => {
     expect(last.requirements.length).toBeGreaterThan(first.requirements.length);
     expect(last.bombPenalty).not.toBeNull();
     expect(first.bombPenalty).toBeNull();
+  });
+});
+
+describe('MOONLIGHT SKY (levels 51-70)', () => {
+  const moonlightLevels = LEVELS.filter((level) => level.worldId === 'world-2');
+
+  it('has exactly 20 levels, all belonging to world-2', () => {
+    expect(moonlightLevels).toHaveLength(20);
+  });
+
+  it('starts meaningfully harder than Star Garden ends - Level 51 vs Level 1', () => {
+    const starGardenFirst = LEVELS[0];
+    const moonlightFirst = moonlightLevels[0];
+    expect(moonlightFirst.movementSpeed).toBeGreaterThan(starGardenFirst.movementSpeed);
+    expect(moonlightFirst.starCount).toBeGreaterThan(starGardenFirst.starCount);
+  });
+
+  it('the world finale (Level 70) is meaningfully harder than the world opener (Level 51)', () => {
+    const first = moonlightLevels[0];
+    const last = moonlightLevels[moonlightLevels.length - 1];
+    expect(last.movementSpeed).toBeGreaterThan(first.movementSpeed);
+    expect(last.starCount).toBeGreaterThan(first.starCount);
+    expect(last.requirements.length).toBeGreaterThan(first.requirements.length);
+    expect(last.bombPenalty).not.toBeNull();
+    expect(first.bombPenalty).toBeNull();
+  });
+
+  it('does not simply increase movement speed every single level (occasional lighter beats)', () => {
+    const speeds = moonlightLevels.map((level) => level.movementSpeed);
+    const monotonicIncreases = speeds.slice(1).filter((speed, i) => speed > speeds[i]).length;
+    expect(monotonicIncreases).toBeLessThan(speeds.length - 1);
   });
 });

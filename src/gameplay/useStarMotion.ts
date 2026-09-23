@@ -4,12 +4,12 @@ import {
   makeMutable,
   useFrameCallback,
   withDelay,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 
 import type { Star } from '../types/star';
-import { hashStringToSeed, seededRandom } from '../utils/random';
 
 export interface StarMotion {
   x: SharedValue<number>;
@@ -31,46 +31,58 @@ interface MotionEntry extends StarMotion {
   vx: SharedValue<number>;
   vy: SharedValue<number>;
   // Where this star actually belongs (its layout position) - x/y start off
-  // at a point well outside the canvas and animate in to here, see the
-  // entrance effect below. Plain numbers are enough; unlike x/y this never
-  // needs to be read reactively.
+  // at a fixed, deterministic off-screen placeholder (real randomization
+  // happens in the entrance effect below, not here - React's purity rule
+  // forbids Math.random() during render, which this useMemo factory counts
+  // as). Plain numbers are enough; unlike x/y this never needs to be read
+  // reactively.
   targetX: number;
   targetY: number;
-  entranceDelayMs: number;
-}
-
-// How far outside the canvas each star starts, along the direction from
-// canvas center through its own layout position (falling back to a random
-// direction for the rare star that lands exactly on center) - the diagonal
-// is a generous, direction-independent guarantee that the start point is
-// off-screen no matter which way that direction points.
-function entranceStartPosition(
-  targetX: number,
-  targetY: number,
-  canvasWidth: number,
-  canvasHeight: number,
-  random: () => number
-): { x: number; y: number } {
-  const centerX = canvasWidth / 2;
-  const centerY = canvasHeight / 2;
-  let dx = targetX - centerX;
-  let dy = targetY - centerY;
-  const magnitude = Math.hypot(dx, dy);
-  if (magnitude < 1) {
-    const angle = random() * Math.PI * 2;
-    dx = Math.cos(angle);
-    dy = Math.sin(angle);
-  } else {
-    dx /= magnitude;
-    dy /= magnitude;
-  }
-  const pushDistance = Math.hypot(canvasWidth, canvasHeight);
-  return { x: targetX + dx * pushDistance, y: targetY + dy * pushDistance };
 }
 
 const ENTRANCE_DURATION_MS = 420;
+const ENTRANCE_LEG_1_RATIO = 0.55; // start -> waypoint gets more of the duration than waypoint -> target
 const ENTRANCE_MAX_STAGGER_MS = 220;
 const ENTRANCE_TOTAL_MS = ENTRANCE_DURATION_MS + ENTRANCE_MAX_STAGGER_MS;
+// How far the path's midpoint bends sideways, as a fraction of the
+// straight-line start->target distance - large enough to read as a curve,
+// not so large the star visibly overshoots past its own resting position.
+const CURVE_BEND_RATIO = 0.35;
+
+// A different, genuinely random entrance every time a level starts (or
+// restarts) - a fully random direction (not derived from layout position,
+// which made every replay of the same level look identical) pushed out
+// past the canvas diagonal (a generous, direction-independent guarantee
+// the start point is off-screen), plus a sideways-bent waypoint so the
+// path swoops in rather than tracing a straight line to its resting spot.
+// Called from the entrance effect (not render) specifically because it's
+// impure - see the MotionEntry.targetX/targetY comment above.
+function randomEntrancePath(
+  targetX: number,
+  targetY: number,
+  canvasWidth: number,
+  canvasHeight: number
+): { startX: number; startY: number; waypointX: number; waypointY: number } {
+  const angle = Math.random() * Math.PI * 2;
+  const pushDistance = Math.hypot(canvasWidth, canvasHeight);
+  const startX = targetX + Math.cos(angle) * pushDistance;
+  const startY = targetY + Math.sin(angle) * pushDistance;
+
+  const dx = targetX - startX;
+  const dy = targetY - startY;
+  const pathLength = Math.hypot(dx, dy) || 1;
+  // Unit vector perpendicular to the straight start->target line.
+  const perpX = -dy / pathLength;
+  const perpY = dx / pathLength;
+  const bend = (Math.random() * 2 - 1) * pathLength * CURVE_BEND_RATIO;
+
+  return {
+    startX,
+    startY,
+    waypointX: (startX + targetX) / 2 + perpX * bend,
+    waypointY: (startY + targetY) / 2 + perpY * bend,
+  };
+}
 
 export interface StarMotionHandle {
   // Per-star reactive position, for driving Skia cx/cy props during render.
@@ -99,21 +111,22 @@ export function useStarMotion(
   const starIdsKey = stars.map((star) => star.id).join(',');
 
   const entries = useMemo<MotionEntry[]>(() => {
-    return stars.map((star) => {
-      const random = seededRandom(hashStringToSeed(star.id));
-      const start = entranceStartPosition(star.x, star.y, canvasWidth, canvasHeight, random);
-      return {
-        id: star.id,
-        x: makeMutable(start.x),
-        y: makeMutable(start.y),
-        radius: star.size,
-        vx: makeMutable(star.vx),
-        vy: makeMutable(star.vy),
-        targetX: star.x,
-        targetY: star.y,
-        entranceDelayMs: random() * ENTRANCE_MAX_STAGGER_MS,
-      };
-    });
+    // A fixed, deterministic off-screen placeholder - just needs to be
+    // outside the canvas so nothing visible flashes at it for the one
+    // frame between this running and the entrance effect below replacing
+    // it with the real randomized start position (see there for why the
+    // real randomization can't happen here, in render).
+    const placeholderY = -Math.hypot(canvasWidth, canvasHeight);
+    return stars.map((star) => ({
+      id: star.id,
+      x: makeMutable(star.x),
+      y: makeMutable(placeholderY),
+      radius: star.size,
+      vx: makeMutable(star.vx),
+      vy: makeMutable(star.vy),
+      targetX: star.x,
+      targetY: star.y,
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on ids, not the stars array
   }, [starIdsKey]);
 
@@ -183,14 +196,36 @@ export function useStarMotion(
     enteringRef.current = true;
     frameCallback.setActive(false);
 
+    const leg1Duration = ENTRANCE_DURATION_MS * ENTRANCE_LEG_1_RATIO;
+    const leg2Duration = ENTRANCE_DURATION_MS - leg1Duration;
+
     for (const entry of entries) {
+      // Computed here (not in the useMemo above) specifically because it's
+      // random - a genuinely different direction, curve, and stagger order
+      // every time this effect runs, i.e. every level start/replay.
+      const path = randomEntrancePath(entry.targetX, entry.targetY, canvasWidth, canvasHeight);
+      const entranceDelayMs = Math.random() * ENTRANCE_MAX_STAGGER_MS;
+
+      // Jump (no animation) from the placeholder to the real randomized
+      // start position first - both are off-screen, so this is invisible -
+      // then animate in two legs through the bent waypoint, not one
+      // straight shot, so it reads as a curved swoop rather than a star
+      // sliding directly into its grid cell.
+      entry.x.value = path.startX;
       entry.x.value = withDelay(
-        entry.entranceDelayMs,
-        withTiming(entry.targetX, { duration: ENTRANCE_DURATION_MS, easing: Easing.out(Easing.cubic) })
+        entranceDelayMs,
+        withSequence(
+          withTiming(path.waypointX, { duration: leg1Duration, easing: Easing.out(Easing.quad) }),
+          withTiming(entry.targetX, { duration: leg2Duration, easing: Easing.inOut(Easing.quad) })
+        )
       );
+      entry.y.value = path.startY;
       entry.y.value = withDelay(
-        entry.entranceDelayMs,
-        withTiming(entry.targetY, { duration: ENTRANCE_DURATION_MS, easing: Easing.out(Easing.cubic) })
+        entranceDelayMs,
+        withSequence(
+          withTiming(path.waypointY, { duration: leg1Duration, easing: Easing.out(Easing.quad) }),
+          withTiming(entry.targetY, { duration: leg2Duration, easing: Easing.inOut(Easing.quad) })
+        )
       );
     }
 

@@ -67,6 +67,15 @@ export default function ProfileScreen({ navigation }: Props) {
   const maxLevelStars = LEVELS.length * 3;
   const currentWorld = WORLDS.find((world) => world.implemented) ?? WORLDS[0];
 
+  // Distinct levels ever completed at least once - deliberately NOT
+  // usePlayerStatsStore's levelsCompleted, which is a lifetime counter that
+  // increments on every completion including replays (it can legitimately
+  // exceed LEVELS.length, and is shown as its own "Level Completions" stat
+  // below). This is the one that means "out of 50" the way the UI reads.
+  const distinctLevelsCompleted = Object.values(levelsProgress).filter(
+    (progress) => progress.completed
+  ).length;
+
   const claimableAchievements = getAchievementsProgress().filter(
     (entry) => entry.isComplete && !entry.isClaimed
   ).length;
@@ -74,7 +83,7 @@ export default function ProfileScreen({ navigation }: Props) {
   // Two real, independently-meaningful ratios blended into one headline
   // number - not a fabricated "player level", just an at-a-glance sense of
   // "how far along is this save" for the header ring.
-  const levelCompletionRatio = LEVELS.length > 0 ? levelsCompleted / LEVELS.length : 0;
+  const levelCompletionRatio = LEVELS.length > 0 ? distinctLevelsCompleted / LEVELS.length : 0;
   const achievementCompletionRatio =
     ACHIEVEMENTS.length > 0 ? claimedAchievementIds.length / ACHIEVEMENTS.length : 0;
   const overallCompletion = (levelCompletionRatio + achievementCompletionRatio) / 2;
@@ -131,10 +140,10 @@ export default function ProfileScreen({ navigation }: Props) {
         <View style={styles.progressRow}>
           <Text style={styles.progressLabel}>Levels</Text>
           <Text style={styles.progressValue}>
-            {levelsCompleted}/{LEVELS.length}
+            {distinctLevelsCompleted}/{LEVELS.length}
           </Text>
         </View>
-        <ProgressBar progress={levelsCompleted} target={LEVELS.length} />
+        <ProgressBar progress={distinctLevelsCompleted} target={LEVELS.length} />
 
         <View style={[styles.progressRow, styles.progressRowSpaced]}>
           <Text style={styles.progressLabel}>Level Stars</Text>
@@ -148,7 +157,7 @@ export default function ProfileScreen({ navigation }: Props) {
       <Text style={styles.sectionHeading}>Gameplay Stats</Text>
       <Card style={styles.card}>
         <View style={styles.statsGrid}>
-          <StatTile label="Levels Completed" value={levelsCompleted} />
+          <StatTile label="Level Completions" value={levelsCompleted} />
           <StatTile label="Total Score" value={totalScoreEarned} />
           <StatTile label="Stars Captured" value={starsCaptured} />
           <StatTile label="Gold Stars" value={goldStarsCaptured} />

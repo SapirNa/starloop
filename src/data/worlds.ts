@@ -14,10 +14,10 @@ export const WORLDS: World[] = [
   {
     id: 'world-2',
     name: 'Moonlight Sky',
-    description: 'Coming soon.',
+    description: 'Faster stars, sharper timing.',
     order: 2,
     accentColor: '#A9C7FF',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'world-3',
